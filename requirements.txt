@@ -1,7 +1,6 @@
-python-telegram-bot
-openai
-flask[async]
+flask
 gunicorn
 python-dotenv
 pillow
 requests
+google-genai
