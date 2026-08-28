@@ -95,11 +95,11 @@ def webhook():
 
         chat_id = chat.get("id")
 
-        text = message.get("text", "")
+        # =========================
+        # Text Message
+        # =========================
 
-        # =========================
-        # /start
-        # =========================
+        text = message.get("text", "")
 
         if text.strip().lower() == "/start":
 
@@ -111,6 +111,44 @@ def webhook():
             )
 
             logger.info("Start message sent to chat %s", chat_id)
+
+            return "OK", 200
+
+        # =========================
+        # Photo / Screenshot
+        # =========================
+
+        photos = message.get("photo")
+
+        if photos:
+
+            # Telegram সাধারণত একাধিক size-এর photo দেয়।
+            # শেষেরটি সবচেয়ে বড় resolution-এর হয়।
+            photo = photos[-1]
+
+            file_id = photo.get("file_id")
+
+            logger.info(
+                "Screenshot received. File ID: %s",
+                file_id
+            )
+
+            send_message(
+                chat_id,
+                "📸 Screenshot পেয়েছি! ✅\n\n"
+                "🧠 এখন technical analysis-এর জন্য প্রস্তুত করছি..."
+            )
+
+            return "OK", 200
+
+        # =========================
+        # Other Messages
+        # =========================
+
+        send_message(
+            chat_id,
+            "📸 অনুগ্রহ করে মার্কেটের একটি screenshot পাঠাও।"
+        )
 
         return "OK", 200
 
