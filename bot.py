@@ -118,63 +118,152 @@ def download_image(file_path):
 
 
 # ==========================================
-# GEMINI VISION ANALYSIS
+# GEMINI TECHNICAL ANALYSIS V2
 # ==========================================
 
 def analyze_chart(image_bytes):
 
     logger.info(
-        "Starting Gemini image analysis..."
+        "Starting Gemini V2 image analysis..."
     )
 
     prompt = """
-You are Azmir Trade Vision, a cautious technical-analysis assistant.
+You are Azmir Trade Vision V2.
 
-Analyze the supplied trading-chart screenshot.
+Your task is to analyze a trading-chart screenshot
+for DEMO research only.
 
-Only use information that is actually visible.
+The intended observation horizon is approximately
+10 seconds.
 
-Analyze:
+IMPORTANT:
 
-1. Market trend
-2. Recent candle structure
-3. Momentum
-4. Support
-5. Resistance
-6. Possible continuation
-7. Possible reversal
-8. Overall setup quality
+You cannot know the future price.
+Never claim guaranteed accuracy.
+Never claim a 95% win rate from one screenshot.
+Do not invent information that is not visible.
 
-Return exactly this structure:
+Your primary objective is QUALITY OVER QUANTITY.
 
-📊 MARKET ANALYSIS
+Analyze these factors:
+
+1. MARKET STRUCTURE
+- Higher highs / higher lows
+- Lower highs / lower lows
+- Range / sideways structure
+
+2. TREND
+- Bullish
+- Bearish
+- Neutral
+
+3. MOMENTUM
+- Strong
+- Moderate
+- Weak
+- Conflicting
+
+4. CANDLE STRUCTURE
+Look at the latest visible candles.
+Check:
+- body size
+- wick rejection
+- consecutive candles
+- engulfing behavior if clearly visible
+- exhaustion
+- consolidation
+
+5. SUPPORT AND RESISTANCE
+Only mention levels that are actually visible.
+Never invent price levels.
+
+6. BREAKOUT / REJECTION
+Check whether price is:
+- breaking a visible level
+- rejecting a level
+- consolidating
+- too close to resistance/support
+
+7. SIGNAL QUALITY
+
+Use a strict confirmation system.
+
+Consider these seven confirmations:
+
+A. Trend alignment
+B. Market structure
+C. Momentum
+D. Candle confirmation
+E. Support/resistance position
+F. Breakout/rejection confirmation
+G. Absence of major contradiction
+
+Do NOT simply add random confidence.
+
+A setup should normally have at least 6 strong confirmations
+before producing CALL or PUT.
+
+If important factors conflict,
+return NO SIGNAL.
+
+If the screenshot is unclear,
+return NO SIGNAL.
+
+If price is already highly extended near a major visible
+resistance/support level,
+prefer NO SIGNAL unless there is a very clear breakout
+confirmation.
+
+Do not force a signal.
+
+OUTPUT EXACTLY:
+
+📊 AZMIR TRADE VISION V2
 
 Trend: ...
+Market Structure: ...
 Momentum: ...
 Candle Structure: ...
 Support: ...
 Resistance: ...
 
+🔎 CONFIRMATIONS
+Trend Alignment: STRONG / WEAK / NONE
+Structure: STRONG / WEAK / NONE
+Momentum: STRONG / WEAK / NONE
+Candle Confirmation: STRONG / WEAK / NONE
+Level Position: STRONG / WEAK / NONE
+Breakout/Rejection: STRONG / WEAK / NONE
+Contradiction Check: CLEAR / CONFLICT
+
 🎯 SIGNAL
 CALL / PUT / NO SIGNAL
 
+📈 SETUP QUALITY
+HIGH / MEDIUM / LOW
+
 📌 CONFIDENCE
-...%
+Give a probability estimate based only on visible evidence.
+Do not automatically use 95%.
+If evidence is weak, use a lower number.
 
 💡 REASON
-...
+Explain briefly why the signal or NO SIGNAL was selected.
+
+⏱️ DEMO HORIZON
+Approximately 10 seconds
 
 ⚠️ RISK NOTE
-...
+This is experimental technical analysis for demo testing.
+Short-duration and OTC markets can be highly unpredictable.
+No signal is guaranteed.
 
-Rules:
+FINAL RULE:
 
-- Never claim 100% accuracy.
-- Never guarantee profit.
-- Never invent price levels.
-- If the screenshot is unclear, choose NO SIGNAL.
-- If the setup is weak or conflicting, choose NO SIGNAL.
-- This is technical analysis, not financial advice.
+A false signal is worse than NO SIGNAL.
+
+Therefore, when uncertain,
+choose NO SIGNAL.
 """
 
     try:
@@ -191,7 +280,7 @@ Rules:
         )
 
         logger.info(
-            "Gemini response received"
+            "Gemini V2 response received"
         )
 
         result = response.text
@@ -223,7 +312,7 @@ Rules:
 def home():
 
     return (
-        "Azmir Trade Vision is running! 🚀",
+        "Azmir Trade Vision V2 is running! 🚀",
         200
     )
 
@@ -273,9 +362,11 @@ def webhook():
 
             send_message(
                 chat_id,
-                "🚀 Azmir Trade Vision চালু হয়েছে!\n\n"
-                "📊 মার্কেটের screenshot পাঠাও।\n"
-                "আমি technical analysis করার জন্য প্রস্তুত।"
+                "🚀 Azmir Trade Vision V2 চালু হয়েছে!\n\n"
+                "📊 10-second demo analysis-এর জন্য "
+                "একটি পরিষ্কার market screenshot পাঠাও।\n\n"
+                "🧠 Strong confirmation না থাকলে "
+                "আমি NO SIGNAL দেব।"
             )
 
             logger.info(
@@ -303,7 +394,8 @@ def webhook():
             send_message(
                 chat_id,
                 "📸 Screenshot পেয়েছি! ✅\n\n"
-                "🧠 Gemini AI technical analysis শুরু করছি..."
+                "🧠 V2 technical analysis শুরু করছি...\n"
+                "⏱️ Target horizon: 10 seconds"
             )
 
             logger.info(
@@ -332,7 +424,7 @@ def webhook():
             )
 
             logger.info(
-                "Gemini analysis completed"
+                "Gemini V2 analysis completed"
             )
 
             send_message(
@@ -348,7 +440,7 @@ def webhook():
 
         send_message(
             chat_id,
-            "📸 একটি market screenshot পাঠাও।"
+            "📸 একটি পরিষ্কার market screenshot পাঠাও।"
         )
 
         return "OK", 200
