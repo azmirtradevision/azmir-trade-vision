@@ -4,3 +4,4 @@ flask[async]
 gunicorn
 python-dotenv
 pillow
+requests
