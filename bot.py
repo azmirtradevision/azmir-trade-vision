@@ -4,7 +4,8 @@ import base64
 import requests
 
 from flask import Flask, request
-from openai import OpenAI
+from google import genai
+from google.genai import types
 
 
 # ==========================================
@@ -12,14 +13,14 @@ from openai import OpenAI
 # ==========================================
 
 TOKEN = os.getenv("BOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
 
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN is not configured")
 
-if not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY is not configured")
+if not GEMINI_API_KEY:
+    raise RuntimeError("GEMINI_API_KEY is not configured")
 
 
 # ==========================================
@@ -40,8 +41,8 @@ logger = logging.getLogger("bot")
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TOKEN}"
 
-openai_client = OpenAI(
-    api_key=OPENAI_API_KEY
+gemini_client = genai.Client(
+    api_key=GEMINI_API_KEY
 )
 
 
@@ -68,8 +69,6 @@ def send_message(chat_id, text):
     )
 
     response.raise_for_status()
-
-    return response.json()
 
 
 # ==========================================
@@ -120,33 +119,25 @@ def download_image(file_path):
 
 
 # ==========================================
-# OPENAI VISION
+# GEMINI VISION ANALYSIS
 # ==========================================
 
 def analyze_chart(image_bytes):
 
     logger.info(
-        "Starting OpenAI image analysis..."
-    )
-
-    image_base64 = base64.b64encode(
-        image_bytes
-    ).decode("utf-8")
-
-    image_data_url = (
-        f"data:image/jpeg;base64,{image_base64}"
+        "Starting Gemini image analysis..."
     )
 
     prompt = """
-You are Azmir Trade Vision.
+You are Azmir Trade Vision, a cautious technical-analysis assistant.
 
-Analyze the trading chart screenshot carefully.
+Analyze the supplied trading-chart screenshot.
 
 Only use information that is actually visible.
 
 Analyze:
 
-1. Trend
+1. Market trend
 2. Recent candle structure
 3. Momentum
 4. Support
@@ -155,7 +146,7 @@ Analyze:
 7. Possible reversal
 8. Overall setup quality
 
-Return this format:
+Return exactly this structure:
 
 📊 MARKET ANALYSIS
 
@@ -177,7 +168,7 @@ CALL / PUT / NO SIGNAL
 ⚠️ RISK NOTE
 ...
 
-Important rules:
+Rules:
 
 - Never claim 100% accuracy.
 - Never guarantee profit.
@@ -189,34 +180,26 @@ Important rules:
 
     try:
 
-        response = openai_client.responses.create(
-            model="gpt-5.6-luna",
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": prompt
-                        },
-                        {
-                            "type": "input_image",
-                            "image_url": image_data_url
-                        }
-                    ]
-                }
+        response = gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[
+                types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type="image/jpeg"
+                ),
+                prompt
             ]
         )
 
         logger.info(
-            "OpenAI response received successfully"
+            "Gemini response received"
         )
 
-        result = response.output_text
+        result = response.text
 
         if not result:
             raise RuntimeError(
-                "OpenAI returned an empty response"
+                "Gemini returned an empty response"
             )
 
         return result
@@ -224,14 +207,12 @@ Important rules:
     except Exception as exc:
 
         logger.exception(
-            "OPENAI ERROR: %s",
+            "GEMINI ERROR: %s",
             exc
         )
 
-        # গুরুত্বপূর্ণ:
-        # আসল error Telegram-এ দেখাবে
         raise RuntimeError(
-            f"OpenAI error: {exc}"
+            f"Gemini error: {exc}"
         ) from exc
 
 
@@ -320,14 +301,12 @@ def webhook():
 
             file_id = photo.get("file_id")
 
-            # Confirmation
             send_message(
                 chat_id,
                 "📸 Screenshot পেয়েছি! ✅\n\n"
-                "🧠 AI technical analysis শুরু করছি..."
+                "🧠 Gemini AI technical analysis শুরু করছি..."
             )
 
-            # Get file
             logger.info(
                 "Getting Telegram file..."
             )
@@ -336,30 +315,23 @@ def webhook():
                 file_id
             )
 
-            logger.info(
-                "Telegram file path received"
-            )
-
-            # Download
             image_bytes = download_image(
                 file_path
             )
 
             logger.info(
-                "Image downloaded successfully: %s bytes",
+                "Image downloaded: %s bytes",
                 len(image_bytes)
             )
 
-            # Analyze
             analysis = analyze_chart(
                 image_bytes
             )
 
             logger.info(
-                "AI analysis completed"
+                "Gemini analysis completed"
             )
 
-            # Send result
             send_message(
                 chat_id,
                 analysis
@@ -398,7 +370,7 @@ def webhook():
             except Exception as telegram_error:
 
                 logger.exception(
-                    "Could not send error to Telegram: %s",
+                    "Telegram error: %s",
                     telegram_error
                 )
 
