@@ -99,7 +99,7 @@ def get_file_path(file_id):
 
 
 # ==========================================
-# DOWNLOAD TELEGRAM IMAGE
+# DOWNLOAD IMAGE
 # ==========================================
 
 def download_image(file_path):
@@ -120,10 +120,14 @@ def download_image(file_path):
 
 
 # ==========================================
-# OPENAI VISION ANALYSIS
+# OPENAI VISION
 # ==========================================
 
 def analyze_chart(image_bytes):
+
+    logger.info(
+        "Starting OpenAI image analysis..."
+    )
 
     image_base64 = base64.b64encode(
         image_bytes
@@ -134,23 +138,24 @@ def analyze_chart(image_bytes):
     )
 
     prompt = """
-You are Azmir Trade Vision, a cautious technical-analysis assistant.
+You are Azmir Trade Vision.
 
-Analyze this trading-chart screenshot.
+Analyze the trading chart screenshot carefully.
 
-Look only at information that is actually visible in the image.
+Only use information that is actually visible.
 
 Analyze:
 
-1. Market trend
+1. Trend
 2. Recent candle structure
 3. Momentum
-4. Support and resistance
-5. Possible continuation
-6. Possible reversal
-7. Overall setup quality
+4. Support
+5. Resistance
+6. Possible continuation
+7. Possible reversal
+8. Overall setup quality
 
-Then provide the result in exactly this format:
+Return this format:
 
 📊 MARKET ANALYSIS
 
@@ -172,38 +177,62 @@ CALL / PUT / NO SIGNAL
 ⚠️ RISK NOTE
 ...
 
-Rules:
+Important rules:
 
 - Never claim 100% accuracy.
-- Never pretend to know information that is not visible.
-- If the chart is unclear, choose NO SIGNAL.
+- Never guarantee profit.
+- Never invent price levels.
+- If the screenshot is unclear, choose NO SIGNAL.
 - If the setup is weak or conflicting, choose NO SIGNAL.
-- Do not invent price levels.
-- Do not guarantee profit.
-- The signal is an analytical opinion, not financial advice.
+- This is technical analysis, not financial advice.
 """
 
-    response = openai_client.responses.create(
-        model="gpt-5.6-luna",
-        input=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": prompt
-                    },
-                    {
-                        "type": "input_image",
-                        "image_url": image_data_url,
-                        "detail": "high"
-                    }
-                ]
-            }
-        ]
-    )
+    try:
 
-    return response.output_text
+        response = openai_client.responses.create(
+            model="gpt-5.6-luna",
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": prompt
+                        },
+                        {
+                            "type": "input_image",
+                            "image_url": image_data_url
+                        }
+                    ]
+                }
+            ]
+        )
+
+        logger.info(
+            "OpenAI response received successfully"
+        )
+
+        result = response.output_text
+
+        if not result:
+            raise RuntimeError(
+                "OpenAI returned an empty response"
+            )
+
+        return result
+
+    except Exception as exc:
+
+        logger.exception(
+            "OPENAI ERROR: %s",
+            exc
+        )
+
+        # গুরুত্বপূর্ণ:
+        # আসল error Telegram-এ দেখাবে
+        raise RuntimeError(
+            f"OpenAI error: {exc}"
+        ) from exc
 
 
 # ==========================================
@@ -232,6 +261,8 @@ def health():
 @app.route("/webhook", methods=["POST"])
 def webhook():
 
+    chat_id = None
+
     try:
 
         data = request.get_json(force=True)
@@ -253,7 +284,7 @@ def webhook():
         chat_id = chat.get("id")
 
         # ==================================
-        # /START
+        # START
         # ==================================
 
         text = message.get("text", "")
@@ -281,37 +312,45 @@ def webhook():
 
         if photos:
 
-            # Largest available Telegram image
-            photo = photos[-1]
-
-            file_id = photo.get("file_id")
-
             logger.info(
                 "Screenshot received"
             )
 
-            # First confirmation
+            photo = photos[-1]
+
+            file_id = photo.get("file_id")
+
+            # Confirmation
             send_message(
                 chat_id,
                 "📸 Screenshot পেয়েছি! ✅\n\n"
                 "🧠 AI technical analysis শুরু করছি..."
             )
 
-            # Get Telegram file path
+            # Get file
+            logger.info(
+                "Getting Telegram file..."
+            )
+
             file_path = get_file_path(
                 file_id
             )
 
-            # Download image
+            logger.info(
+                "Telegram file path received"
+            )
+
+            # Download
             image_bytes = download_image(
                 file_path
             )
 
             logger.info(
-                "Image downloaded successfully"
+                "Image downloaded successfully: %s bytes",
+                len(image_bytes)
             )
 
-            # AI analysis
+            # Analyze
             analysis = analyze_chart(
                 image_bytes
             )
@@ -320,7 +359,7 @@ def webhook():
                 "AI analysis completed"
             )
 
-            # Send analysis
+            # Send result
             send_message(
                 chat_id,
                 analysis
@@ -334,7 +373,7 @@ def webhook():
 
         send_message(
             chat_id,
-            "📸 অনুগ্রহ করে একটি market screenshot পাঠাও।"
+            "📸 একটি market screenshot পাঠাও।"
         )
 
         return "OK", 200
@@ -342,23 +381,26 @@ def webhook():
     except Exception as exc:
 
         logger.exception(
-            "Webhook error: %s",
+            "WEBHOOK ERROR: %s",
             exc
         )
 
-        try:
+        if chat_id:
 
-            if "chat_id" in locals():
+            try:
 
                 send_message(
                     chat_id,
-                    "⚠️ Screenshot analysis করতে সমস্যা হয়েছে।\n\n"
-                    "কিছুক্ষণ পরে আবার চেষ্টা করো।"
+                    "⚠️ Analysis করতে সমস্যা হয়েছে।\n\n"
+                    f"Error: {str(exc)[:700]}"
                 )
 
-        except Exception:
+            except Exception as telegram_error:
 
-            pass
+                logger.exception(
+                    "Could not send error to Telegram: %s",
+                    telegram_error
+                )
 
         return "ERROR", 500
 
@@ -372,4 +414,4 @@ if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=PORT
-)
+    )
