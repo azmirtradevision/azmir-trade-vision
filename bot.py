@@ -1,5 +1,7 @@
 import os
 import logging
+import time
+import threading
 import requests
 
 from flask import Flask, request
@@ -14,6 +16,10 @@ from google.genai import types
 TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
+
+GEMINI_MODEL = "gemini-3.6-flash"
+MAX_RETRIES = 3
+RETRY_DELAYS = [3, 6, 9]
 
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN is not configured")
@@ -53,6 +59,38 @@ app = Flask(__name__)
 
 
 # ==========================================
+# DUPLICATE UPDATE PROTECTION
+# ==========================================
+
+processed_updates = set()
+processed_updates_lock = threading.Lock()
+
+MAX_STORED_UPDATES = 1000
+
+
+def is_duplicate_update(update_id):
+
+    if update_id is None:
+        return False
+
+    with processed_updates_lock:
+
+        if update_id in processed_updates:
+            return True
+
+        processed_updates.add(update_id)
+
+        # Prevent unlimited memory growth
+        if len(processed_updates) > MAX_STORED_UPDATES:
+
+            processed_updates.clear()
+
+            processed_updates.add(update_id)
+
+        return False
+
+
+# ==========================================
 # TELEGRAM SEND MESSAGE
 # ==========================================
 
@@ -89,6 +127,7 @@ def get_file_path(file_id):
     data = response.json()
 
     if not data.get("ok"):
+
         raise RuntimeError(
             f"Telegram getFile failed: {data}"
         )
@@ -118,7 +157,7 @@ def download_image(file_path):
 
 
 # ==========================================
-# GEMINI TECHNICAL ANALYSIS V2
+# GEMINI TECHNICAL ANALYSIS V2 + RETRY
 # ==========================================
 
 def analyze_chart(image_bytes):
@@ -165,6 +204,7 @@ Analyze these factors:
 
 4. CANDLE STRUCTURE
 Look at the latest visible candles.
+
 Check:
 - body size
 - wick rejection
@@ -174,10 +214,12 @@ Check:
 - consolidation
 
 5. SUPPORT AND RESISTANCE
+
 Only mention levels that are actually visible.
 Never invent price levels.
 
 6. BREAKOUT / REJECTION
+
 Check whether price is:
 - breaking a visible level
 - rejecting a level
@@ -198,10 +240,9 @@ E. Support/resistance position
 F. Breakout/rejection confirmation
 G. Absence of major contradiction
 
-Do NOT simply add random confidence.
-
-A setup should normally have at least 6 strong confirmations
-before producing CALL or PUT.
+A setup should normally have at least
+6 strong confirmations before producing
+CALL or PUT.
 
 If important factors conflict,
 return NO SIGNAL.
@@ -209,10 +250,10 @@ return NO SIGNAL.
 If the screenshot is unclear,
 return NO SIGNAL.
 
-If price is already highly extended near a major visible
-resistance/support level,
-prefer NO SIGNAL unless there is a very clear breakout
-confirmation.
+If price is already highly extended near
+a major visible resistance/support level,
+prefer NO SIGNAL unless there is a
+very clear breakout confirmation.
 
 Do not force a signal.
 
@@ -228,6 +269,7 @@ Support: ...
 Resistance: ...
 
 🔎 CONFIRMATIONS
+
 Trend Alignment: STRONG / WEAK / NONE
 Structure: STRONG / WEAK / NONE
 Momentum: STRONG / WEAK / NONE
@@ -237,25 +279,40 @@ Breakout/Rejection: STRONG / WEAK / NONE
 Contradiction Check: CLEAR / CONFLICT
 
 🎯 SIGNAL
+
 CALL / PUT / NO SIGNAL
 
 📈 SETUP QUALITY
+
 HIGH / MEDIUM / LOW
 
 📌 CONFIDENCE
-Give a probability estimate based only on visible evidence.
+
+Give a probability estimate based only
+on visible evidence.
+
 Do not automatically use 95%.
-If evidence is weak, use a lower number.
+
+If evidence is weak,
+use a lower number.
 
 💡 REASON
-Explain briefly why the signal or NO SIGNAL was selected.
+
+Explain briefly why the signal or
+NO SIGNAL was selected.
 
 ⏱️ DEMO HORIZON
+
 Approximately 10 seconds
 
 ⚠️ RISK NOTE
-This is experimental technical analysis for demo testing.
-Short-duration and OTC markets can be highly unpredictable.
+
+This is experimental technical analysis
+for demo testing.
+
+Short-duration and OTC markets can be
+highly unpredictable.
+
 No signal is guaranteed.
 
 FINAL RULE:
@@ -266,42 +323,82 @@ Therefore, when uncertain,
 choose NO SIGNAL.
 """
 
-    try:
+    last_error = None
 
-        response = gemini_client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=[
-                types.Part.from_bytes(
-                    data=image_bytes,
-                    mime_type="image/jpeg"
-                ),
-                prompt
-            ]
-        )
+    for attempt in range(1, MAX_RETRIES + 1):
 
-        logger.info(
-            "Gemini V2 response received"
-        )
+        try:
 
-        result = response.text
-
-        if not result:
-            raise RuntimeError(
-                "Gemini returned an empty response"
+            logger.info(
+                "Gemini attempt %s of %s",
+                attempt,
+                MAX_RETRIES
             )
 
-        return result
+            response = gemini_client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=[
+                    types.Part.from_bytes(
+                        data=image_bytes,
+                        mime_type="image/jpeg"
+                    ),
+                    prompt
+                ]
+            )
 
-    except Exception as exc:
+            result = response.text
 
-        logger.exception(
-            "GEMINI ERROR: %s",
-            exc
-        )
+            if not result:
 
-        raise RuntimeError(
-            f"Gemini error: {exc}"
-        ) from exc
+                raise RuntimeError(
+                    "Gemini returned an empty response"
+                )
+
+            logger.info(
+                "Gemini response received successfully"
+            )
+
+            return result
+
+        except Exception as exc:
+
+            last_error = exc
+            error_text = str(exc)
+
+            logger.exception(
+                "Gemini attempt %s failed: %s",
+                attempt,
+                exc
+            )
+
+            is_unavailable = (
+                "503" in error_text
+                or "UNAVAILABLE" in error_text.upper()
+                or "high demand" in error_text.lower()
+            )
+
+            if attempt < MAX_RETRIES and is_unavailable:
+
+                delay = RETRY_DELAYS[
+                    attempt - 1
+                ]
+
+                logger.warning(
+                    "Gemini temporarily unavailable. "
+                    "Retrying in %s seconds...",
+                    delay
+                )
+
+                time.sleep(delay)
+
+                continue
+
+            break
+
+    raise RuntimeError(
+        f"Gemini analysis failed after "
+        f"{MAX_RETRIES} attempts: {last_error}"
+    )
 
 
 # ==========================================
@@ -336,18 +433,36 @@ def webhook():
 
         data = request.get_json(force=True)
 
+        # ==================================
+        # DUPLICATE UPDATE CHECK
+        # ==================================
+
+        update_id = data.get("update_id")
+
+        if is_duplicate_update(update_id):
+
+            logger.info(
+                "Duplicate update ignored: %s",
+                update_id
+            )
+
+            return "OK", 200
+
         logger.info(
-            "Telegram update received"
+            "Telegram update received: %s",
+            update_id
         )
 
         message = data.get("message")
 
         if not message:
+
             return "OK", 200
 
         chat = message.get("chat")
 
         if not chat:
+
             return "OK", 200
 
         chat_id = chat.get("id")
@@ -391,10 +506,12 @@ def webhook():
 
             file_id = photo.get("file_id")
 
+            # Send confirmation only once
             send_message(
                 chat_id,
                 "📸 Screenshot পেয়েছি! ✅\n\n"
                 "🧠 V2 technical analysis শুরু করছি...\n"
+                "🔄 প্রয়োজনে AI automatically retry করবে।\n"
                 "⏱️ Target horizon: 10 seconds"
             )
 
@@ -445,6 +562,7 @@ def webhook():
 
         return "OK", 200
 
+
     except Exception as exc:
 
         logger.exception(
@@ -456,10 +574,30 @@ def webhook():
 
             try:
 
+                error_text = str(exc)
+
+                if (
+                    "503" in error_text
+                    or "UNAVAILABLE" in error_text.upper()
+                ):
+
+                    message_text = (
+                        "⚠️ Gemini AI এই মুহূর্তে ব্যস্ত আছে।\n\n"
+                        "🔄 আমি কয়েকবার automatically retry করেছি, "
+                        "কিন্তু response পাইনি।\n\n"
+                        "📸 একটু পরে আবার screenshot পাঠাও।"
+                    )
+
+                else:
+
+                    message_text = (
+                        "⚠️ Analysis করতে সমস্যা হয়েছে।\n\n"
+                        f"Error: {error_text[:700]}"
+                    )
+
                 send_message(
                     chat_id,
-                    "⚠️ Analysis করতে সমস্যা হয়েছে।\n\n"
-                    f"Error: {str(exc)[:700]}"
+                    message_text
                 )
 
             except Exception as telegram_error:
